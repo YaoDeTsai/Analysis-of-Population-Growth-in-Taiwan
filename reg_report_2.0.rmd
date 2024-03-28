@@ -1,0 +1,268 @@
+---
+title: "reg_report"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(alr4)
+library(dplyr)
+library(GGally)
+library(ggfortify)
+library(MASS)
+library(ggplot2)
+library(DAAG)
+library(lmtest)
+library(car)
+library(corrplot) 
+```
+
+```{r}
+dev.new(noRStudioGD = TRUE)
+```
+
+```{r}
+#DATA_source
+pop_change <- read.csv('C:/Users/TYDer/reg_data/108年4季行政區人口消長統計_鄉鎮市區.csv')
+pop_index <- read.csv('C:/Users/TYDer/reg_data/108年12月行政區人口指標_鄉鎮市區.csv')
+pop <- read.csv('C:/Users/TYDer/reg_data/108年12月行政區人口統計_鄉鎮市區.csv')
+hospital <- read.csv('C:/Users/TYDer/reg_data/108年12月行政區醫療院所統計_鄉鎮市區.csv')
+marry <- read.csv('C:/Users/TYDer/reg_data/108年4季行政區結婚統計_鄉鎮市區.csv')
+divorce <- read.csv('C:/Users/TYDer/reg_data/108年4季行政區離婚統計_鄉鎮市區.csv')
+income <- read.csv('C:/Users/TYDer/reg_data/108年綜合所得稅所得總額申報統計_鄉鎮市區.csv')
+mid_low_income<- read.csv('C:/Users/TYDer/reg_data/108年12月行政區中低收入戶統計指標_鄉鎮市區.csv')
+low_income<- read.csv('C:/Users/TYDer/reg_data/108年12月行政區低收入戶統計指標_鄉鎮市區.csv')
+
+
+```
+
+```{r}
+#Data combination
+joining <- left_join(pop_index,pop,by = c("COUNTY_ID","COUNTY","TOWN_ID","TOWN","INFO_TIME"))
+joining <- left_join(joining,hospital,by = c("COUNTY_ID","COUNTY","TOWN_ID","TOWN","INFO_TIME"))
+joining <- left_join(joining,mid_low_income ,by = c("COUNTY_ID","COUNTY","TOWN_ID","TOWN","INFO_TIME"))
+joining <- left_join(joining,low_income ,by = c("COUNTY_ID","COUNTY","TOWN_ID","TOWN","INFO_TIME"))
+joining <- left_join(joining,pop_change,by = c("COUNTY_ID","COUNTY","TOWN_ID","TOWN"))
+joining <- left_join(joining,marry ,by = c("COUNTY_ID","COUNTY","TOWN_ID","TOWN"))
+joining <- left_join(joining,divorce ,by = c("COUNTY_ID","COUNTY","TOWN_ID","TOWN"))
+full_data <- left_join(joining,income,by = c("COUNTY_ID","COUNTY","TOWN_ID","TOWN"))
+#write.csv(full_data ,file="nat_inc.csv")
+full_colname<- full_data[1,]
+full_colname[2,] <-c(1:55)
+t(full_colname)
+full_data
+#match("Hospital_H_CNT",names(soli_pop))
+#?match
+```
+
+```{r}
+#Data selection
+nat_inc <- full_data[c(2,4,29,5,9,10,7,17,20,23,27,37,42,49,14)]
+colname <- nat_inc[1,]
+colname[2,] <-c(1:ncol(nat_inc))
+t(colname)
+colname[1,]
+#去掉中文標籤並將資料轉為數值
+nat_inc <- nat_inc[-1,]
+nat_inc[,-c(1:2)] <- apply(nat_inc[,-c(1:2)], 2,           
+                    function(x) as.numeric(as.character(x)))
+nat_inc[,12] <-nat_inc[,12]*1000/nat_inc[,15] #結婚對數轉為結婚率(千分比)
+nat_inc[,13] <-nat_inc[,13]*1000/nat_inc[,15] #離婚對數轉為離婚率(千分比)
+names(nat_inc)[12]= "RATE_MARRY_CP_CNT"
+names(nat_inc)[13]= "RATE_DIVORCE_CP_CNT"
+
+nat_inc
+write.csv(nat_inc ,file="變數選取.csv")
+colname <- nat_inc[1,]
+colname[2,] <-c(1:ncol(nat_inc))
+t(colname)
+```
+
+```{r}
+#分析變數間的線性關係並選取變數
+
+#相關係數矩陣
+f <-cor(nat_inc[,c(3:ncol(nat_inc))], use="complete.obs") 
+round(f, 4)
+
+corrplot(f,method="number",type="lower")
+#剔除各x與y相關係數太小及太大之x
+nat_inc <- nat_inc[,-c(7,9,10,12,13)]
+f <-cor(nat_inc[,c(3:ncol(nat_inc))], use="complete.obs") 
+round(f, 4)
+nat_inc
+
+#各項x對y之散佈圖
+#par(mfrow=c(3,3))
+for(i in 4:ncol(nat_inc)){
+  plot(y=nat_inc[,3],x=nat_inc[,i],
+       xlab=colnames(nat_inc[i]),ylab=colnames("NATURE_INC_CNT"))
+}
+#na.omit(nat_inc)
+#par(mfrow=c(2,2))
+for(i in 4:ncol(nat_inc)){
+  plot(y=nat_inc[,3],x=log(nat_inc[,i]),
+       xlab=colnames(nat_inc[i]),ylab=colnames(names(nat_inc)[3]))
+}
+nat_inc[,c(7,8,9,10)] <- log(nat_inc[,c(7,8,9,10)]+1)
+nat_inc
+#for(i in 4:ncol(nat_inc)){
+#  plot(y=nat_inc[,3],x=exp(nat_inc[,i]),
+#       xlab=colnames(nat_inc[i]),ylab=colnames("NATURE_INC_CNT"))
+#}
+
+#is.finite(nat_inc[,3]+1)
+
+f_1 <-cor(nat_inc[,c(3:ncol(nat_inc))], use="complete.obs") 
+round(f_1, 4)
+lm_0 <-lm(NATURE_INC_CNT ~. -TOWN -COUNTY, data = nat_inc) #判斷有無共線性
+vif(lm_0)
+nat_inc <- nat_inc[,-7]
+lm_0_1 <-lm(NATURE_INC_CNT ~. -TOWN -COUNTY, data = nat_inc) #判斷有無共線性
+vif(lm_0_1)
+
+nat_inc
+
+#for(i in 6:ncol(nat_inc)){
+#  plot(y=nat_inc[,3],x=(nat_inc[,i])^0.25,
+#      xlab=colnames(nat_inc[i]),ylab=colnames(names(nat_inc)[3]))
+# nat_inc[,i]<-(nat_inc[,i])^0.25
+#}
+nat_inc
+
+```
+
+```{r}
+#模型1(考慮兩兩交互作用)
+lm_1 <-lm(NATURE_INC_CNT ~(.-TOWN -COUNTY)^2 -TOWN -COUNTY, data = nat_inc)
+summary(lm_1)
+plot(lm_1)
+autoplot(lm_1)
+
+#AIC
+lm_1 <-lm(NATURE_INC_CNT ~(.-TOWN -COUNTY)^2 -TOWN -COUNTY, data = nat_inc)
+step.model <- stepAIC(lm_1, direction = "both", trace = TRUE)
+summary(step.model)
+
+#依照AIC值選取變數
+y <- nat_inc$NATURE_INC_CNT
+lm_2 <-lm(y ~ +M_F_RAT +A65UP_A15A64_RAT +RLP_CNT +FLD03 +House_P_CNT +M_F_RAT:RLP_CNT +M_F_RAT:House_P_CNT +A65UP_A15A64_RAT:House_P_CNT +A65UP_A15A64_RAT:House_P_CNT +RLP_CNT:House_P_CNT +FLD03:House_P_CNT, data = nat_inc)
+summary(lm_2)
+anova(lm_2)
+autoplot(lm_2)
+
+#bptest(lm_2)      #殘差齊一性檢定
+#殘差檢定
+e_2 = residuals(lm_2)
+shapiro.test(e_2) #常態性檢定
+dwtest(lm_2)      #獨立性檢定
+ncvTest(lm_2)     #同質變異數檢定
+```
+
+```{r}
+#先把y轉為positive
+y_prime <- y-min(y)+1   #y'=y-min(y)+1
+min(y)
+lm_3 <-lm(y_prime ~ +M_F_RAT +A65UP_A15A64_RAT +RLP_CNT +FLD03 +House_P_CNT +M_F_RAT:RLP_CNT +M_F_RAT:House_P_CNT +A65UP_A15A64_RAT:House_P_CNT +A65UP_A15A64_RAT:House_P_CNT +RLP_CNT:House_P_CNT +FLD03:House_P_CNT, data = nat_inc)
+summary(lm_3)
+plot(lm_3)
+autoplot(lm_3)
+
+#使用Box-Cox轉換
+lm_3 <-lm(y_prime ~ +M_F_RAT +A65UP_A15A64_RAT +RLP_CNT +FLD03 +House_P_CNT +M_F_RAT:RLP_CNT +M_F_RAT:House_P_CNT +A65UP_A15A64_RAT:House_P_CNT +A65UP_A15A64_RAT:House_P_CNT +RLP_CNT:House_P_CNT +FLD03:House_P_CNT, data = nat_inc)
+b=boxcox(lm_3)
+lambda<-b$x[which(b$y==max(b$y))]
+lambda
+
+y_star <- (y_prime^lambda-1)/lambda  #y*=(y'^λ-1)/λ
+lm_4<-lm(y_star ~ +M_F_RAT +A65UP_A15A64_RAT +RLP_CNT +FLD03 +House_P_CNT +M_F_RAT:RLP_CNT +M_F_RAT:House_P_CNT +A65UP_A15A64_RAT:House_P_CNT +A65UP_A15A64_RAT:House_P_CNT +RLP_CNT:House_P_CNT +FLD03:House_P_CNT, data = nat_inc)
+summary(lm_4)
+autoplot(lm_4)
+
+#殘差檢定
+e_4 = residuals(lm_4)
+shapiro.test(e_4) #常態性檢定
+dwtest(lm_4)      #獨立性檢定
+ncvTest(lm_4)     #同質變異數檢定
+```
+```{r}
+lm_4_1<-lm(y_star ~ +M_F_RAT +A65UP_A15A64_RAT +RLP_CNT +FLD03 +House_P_CNT +M_F_RAT:RLP_CNT +M_F_RAT:House_P_CNT +A65UP_A15A64_RAT:House_P_CNT +A65UP_A15A64_RAT:House_P_CNT +RLP_CNT:House_P_CNT +FLD03:House_P_CNT, data = nat_inc)
+summary(lm_4)
+autoplot(lm_4)
+```
+
+```{r}
+#檢差是否為同值變異數
+plot(fitted(lm_4), resid(lm_4), xlab='Fitted Values', ylab='Residuals')
+bptest(lm_4)
+ncvTest(lm_4)
+#wt <- 1/fitted( lm(abs(residuals(lm_4))~fitted(lm_4)) )^2
+
+#加權最小平方法
+wt <- 1 / lm(abs(lm_4$residuals) ~ lm_4$fitted.values)$fitted.values^2
+wt
+wls_lm_5 <- lm(lm_4, data =nat_inc , weights =wt)
+summary(wls_lm_5)
+autoplot(wls_lm_5)
+
+
+#殘差檢定
+e_5= residuals(wls_lm_5)
+shapiro.test(e_5)       #常態性檢定
+dwtest(wls_lm_5)        #獨立性檢定
+bptest(wls_lm_5)        #同質變異數檢定(Breusch–Pagan test)
+
+
+```
+
+```{r}
+#ncvTest(wls_lm_5)     #同質變異數檢定
+
+#殘差分析
+#標準化殘差
+e = residuals(wls_lm_5)
+se = e/sd(e)
+fit = fitted(wls_lm_5)
+plot(se,ylim=c(-5,5))
+abline(h=0,col=2,lwd=2)
+abline(h=-3,lty=2)
+abline(h=3,lty=2)
+#一般殘差
+plot(fit,se,ylim=c(-5,5))
+abline(h=0,col=2,lwd=2)
+abline(h=-3,lty=2)
+abline(h=3,lty=2)
+
+
+
+#用Cook distance 尋找離群值
+cooks_dist<-cooks.distance(wls_lm_5)
+which(cooks_dist>1) #選取準則 Cook distance >1
+plot(as.vector(cooks_dist),type="h",ylim=c(0,1))
+abline(h=1,lty=2)
+
+
+#槓桿值
+hatvalues(wls_lm_5)
+which(hatvalues(wls_lm_5)>2*(10+1)/368)
+```
+
+```{r}
+write.csv(nat_inc ,file="變數選取.csv")
+summary(wls_lm_5)
+autoplot(wls_lm_5)
+
+```
+
+```{r}
+#分析殘差
+#lm_soli_pop <- lm(Care_pop ~ soli_pop[,5] ,data=soli_pop)
+#rsdl_soli_pop <- lm_soli_pop$residuals 
+           
+#MSE
+#print(sprintf("RMSE=%0.2f", sqrt(mean(sum_Mod$residuals^2))))
+
+```
